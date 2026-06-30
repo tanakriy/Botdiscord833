@@ -2,68 +2,66 @@ import os
 import subprocess
 import time
 import re
+import ipaddress
+import socket
 
 # ==============================================
-# 🛠️ ส่วนติดตั้งเครื่องมืออัตโนมัติ
+# 🛠️ ตรวจสอบเครื่องมือ
 # ==============================================
 def install_tools():
     print("=" * 60)
-    print("📥 กำลังตรวจสอบและติดตั้งเครื่องมือที่จำเป็น...")
+    print("📥 ตรวจสอบและติดตั้งเครื่องมือ...")
     print("=" * 60)
-    tools = [
-        "python", "nmap", "net-tools", "iproute2", "arp-scan",
-        "wireless-tools", "speedtest-cli", "tcpdump", "curl", "git"
-    ]
     try:
         subprocess.run(["pkg", "update", "-y"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["pkg", "upgrade", "-y"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        for tool in tools:
-            print(f"🔧 ติดตั้ง: {tool}")
-            subprocess.run(["pkg", "install", "-y", tool], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["pip", "install", "--upgrade", "pip", "speedtest-cli"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print("✅ ติดตั้งเครื่องมือทั้งหมดเสร็จสิ้น!")
+        subprocess.run(["pkg", "install", "-y", "python", "nmap", "net-tools", "iproute2"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["pip", "install", "--upgrade", "speedtest-cli"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print("✅ ติดตั้งเสร็จสิ้น!")
         time.sleep(1)
     except Exception as e:
-        print(f"❌ เกิดข้อผิดพลาดตอนติดตั้ง: {e}")
+        print(f"❌ ผิดพลาด: {e}")
         time.sleep(2)
 
 # ==============================================
-# 📶 สแกนอุปกรณ์ในเครือข่าย
+# 📡 ดึงช่วง IP เครือข่าย/ฮอตสปอต
+# ==============================================
+def get_network_range():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+        return str(ipaddress.ip_network(f"{local_ip}/24", strict=False))
+    except:
+        return "192.168.43.0/24"
+
+# ==============================================
+# 🔍 สแกนอุปกรณ์ (ใช้ nmap แทน arp-scan)
 # ==============================================
 def scan_network():
     print("\n" + "=" * 60)
-    print("📡 สแกนอุปกรณ์ที่เชื่อมต่อในเครือข่าย")
+    print("📡 สแกนอุปกรณ์ที่เชื่อมต่อ")
     print("=" * 60)
+    subnet = get_network_range()
+    print(f"🌐 สแกนช่วง: {subnet}")
+    print("-" * 60)
+    print(f"{'IP Address':<18} {'MAC Address':<20} {'สถานะ'}")
+    print("-" * 60)
     try:
-        result = subprocess.check_output(["arp-scan", "-l"], text=True, stderr=subprocess.DEVNULL)
-        print(f"{'IP Address':<18} {'MAC Address':<20} {'ผู้ผลิต/รายละเอียด'}")
-        print("-" * 60)
-        lines = result.splitlines()
-        for line in lines:
-            if re.match(r'\d+\.\d+\.\d+\.\d+', line):
-                parts = line.split()
-                if len(parts) >= 3:
-                    ip = parts[0]
-                    mac = parts[1].upper()
-                    vendor = " ".join(parts[2:])
-                    print(f"{ip:<18} {mac:<20} {vendor}")
-    except:
-        print("⚠️ arp-scan ไม่ทำงาน ใช้ nmap แทน...")
-        subnet = "192.168.43.0/24"
-        result = subprocess.check_output(["nmap", "-sn", "-T4", subnet], text=True, stderr=subprocess.DEVNULL)
+        result = subprocess.check_output(["nmap", "-sn", "-PR", "-T4", subnet], text=True, stderr=subprocess.DEVNULL, timeout=30)
         ip = mac = None
-        print(f"{'IP Address':<18} {'MAC Address':<20} {'สถานะ'}")
-        print("-" * 60)
         for line in result.splitlines():
             if "Nmap scan report for" in line:
-                ip = re.search(r'(\d+\.\d+\.\d+\.\d+)', line).group(1)
+                ip = re.search(r'\d+\.\d+\.\d+\.\d+', line).group()
             elif "MAC Address:" in line:
-                mac = re.search(r'([0-9A-Fa-f:]{17})', line).group(0)
+                mac = re.search(r'([0-9A-Fa-f:]{17})', line).group()
                 print(f"{ip:<18} {mac:<20} 🟢 ออนไลน์")
+    except Exception as e:
+        print(f"⚠️ สแกนผิดพลาด: {e}")
     input("\nกด Enter เพื่อกลับเมนู...")
 
 # ==============================================
-# 📊 ตรวจสอบความเร็วอินเทอร์เน็ต
+# ⚡ ทดสอบความเร็วเน็ต
 # ==============================================
 def check_speed():
     print("\n" + "=" * 60)
@@ -76,36 +74,20 @@ def check_speed():
     input("\nกด Enter เพื่อกลับเมนู...")
 
 # ==============================================
-# 📻 วิเคราะห์สัญญาณ Wi‑Fi
-# ==============================================
-def analyze_wifi():
-    print("\n" + "=" * 60)
-    print("📶 วิเคราะห์สัญญาณ Wi‑Fi")
-    print("=" * 60)
-    try:
-        subprocess.run(["iwlist", "wlan0", "scan"], check=True)
-    except:
-        print("⚠️ ไม่สามารถสแกนคลื่นได้ในโหมดปกติ (ต้องใช้สิทธิ์พิเศษหรืออุปกรณ์รองรับ)")
-        print("💡 แสดงข้อมูลเครือข่ายปัจจุบันแทน:")
-        subprocess.run(["ip", "addr", "show", "wlan0"])
-    input("\nกด Enter เพื่อกลับเมนู...")
-
-# ==============================================
-# 🛡️ เมนูหลัก
+# 📋 เมนูหลัก
 # ==============================================
 def main_menu():
     while True:
         os.system("clear")
         print("=" * 60)
-        print("📦 ชุดเครื่องมือตรวจสอบเครือข่าย & สัญญาณ")
+        print("🛠️ ชุดเครื่องมือตรวจสอบเครือข่าย")
         print("=" * 60)
-        print("1. ติดตั้งเครื่องมือทั้งหมดอัตโนมัติ")
-        print("2. สแกนอุปกรณ์ในเครือข่าย / ฮอตสปอต")
-        print("3. ทดสอบความเร็วอินเทอร์เน็ต")
-        print("4. วิเคราะห์สัญญาณ Wi‑Fi")
-        print("5. ออกจากโปรแกรม")
+        print("1. ติดตั้ง/อัปเดตเครื่องมือ")
+        print("2. สแกนอุปกรณ์ในเครือข่าย/ฮอตสปอต")
+        print("3. ทดสอบความเร็วเน็ต")
+        print("4. ออกจากโปรแกรม")
         print("-" * 60)
-        choice = input("👉 เลือกเมนูที่ต้องการ: ")
+        choice = input("👉 เลือกเมนู: ")
 
         if choice == "1":
             install_tools()
@@ -114,12 +96,10 @@ def main_menu():
         elif choice == "3":
             check_speed()
         elif choice == "4":
-            analyze_wifi()
-        elif choice == "5":
-            print("👋 จบการทำงาน...")
+            print("👋 จบการทำงาน")
             break
         else:
-            print("❌ เลือกไม่ถูกต้อง ลองใหม่")
+            print("❌ เลือกไม่ถูกต้อง")
             time.sleep(1)
 
 if __name__ == "__main__":
